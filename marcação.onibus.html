@@ -1,0 +1,326 @@
+<!DOCTYPE html>
+<html lang="pt-br">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Relatório Transporte Interno</title>
+  <style>
+    body {
+      font-family: 'Arial', sans-serif;
+      margin: 0;
+      padding: 0;
+      background-color: #f4f7fc;
+      color: #333;
+    }
+    h2 {
+      text-align: center;
+      font-size: 32px;
+      margin: 40px 0;
+      color: #4CAF50;
+    }
+    .filters-container, .modal-content, table {
+      box-sizing: border-box;
+    }
+    .filters-container {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 20px;
+      margin: 0 auto;
+      padding: 20px;
+      width: 100%;
+      max-width: 1200px;
+      background-color: #fff;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+      border-radius: 12px;
+    }
+    .filters {
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 20px;
+      margin-top: 20px;
+    }
+    .filters label, .filters select, .filters input, .filters button {
+      font-size: 16px;
+    }
+    .filters select, .filters input, .filters button {
+      padding: 12px;
+      border-radius: 8px;
+      border: 1px solid #ddd;
+      width: 200px;
+    }
+    .filters button {
+      background-color: #4CAF50;
+      color: white;
+      cursor: pointer;
+      border: none;
+    }
+    .filters button:hover {
+      background-color: #45a049;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 40px auto;
+      max-width: 1200px;
+      border-radius: 12px;
+      overflow: hidden;
+    }
+    table th, table td {
+      padding: 12px 20px;
+      border: 1px solid #ddd;
+    }
+    table th {
+      background-color: #f4f4f4;
+      font-weight: bold;
+    }
+    .modal {
+      display: none;
+      position: fixed;
+      z-index: 10;
+      top: 0; left: 0;
+      width: 100%;
+      height: 100%;
+      background-color: rgba(0,0,0,0.5);
+      align-items: center;
+      justify-content: center;
+    }
+    .modal-content {
+      background-color: #fff;
+      padding: 30px;
+      border-radius: 10px;
+      width: 350px;
+      text-align: center;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+    }
+    @media (max-width: 768px) {
+      .filters select, .filters input, .filters button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  <h2>Marção de ponto Transporte Interno</h2>
+  <div class="filters-container">
+    <div class="filters">
+      <div>
+        <label for="hour-filter">Horário:</label>
+        <select id="hour-filter"><option value="">Selecione um horário</option></select>
+      </div>
+      <div>
+        <label for="driver-filter">Motorista:</label>
+        <select id="driver-filter"><option value="">Selecione um motorista</option></select>
+      </div>
+      <div>
+        <button onclick="applyFilters()">Aplicar Filtros</button>
+        <button onclick="clearFilters()">Limpar Filtros</button>
+        <button onclick="sendMessage()">Enviar</button>
+        <button onclick="openModal('add')">Adicionar Motorista</button>
+        <button onclick="openModal('remove')">Excluir Motorista</button>
+      </div>
+    </div>
+  </div>
+  <table>
+    <thead>
+      <tr>
+        <th>Data</th>
+        <th>Hora</th>
+        <th>Solicitante</th>
+        <th>Ponto Desejado</th>
+        <th>Horário Desejado</th>
+      </tr>
+    </thead>
+    <tbody id="table-body"></tbody>
+  </table>
+  <div id="addDriverModal" class="modal">
+    <div class="modal-content">
+      <h3 id="modal-title">Adicionar Motorista</h3>
+      <input type="text" id="new-driver-name" placeholder="Nome do motorista">
+      <input type="text" id="new-driver-phone" placeholder="Telefone (com DDD)">
+      <select id="remove-driver-select" style="display: none;"><option value="">Selecione um motorista para excluir</option></select>
+      <button id="modal-action-button" onclick="saveOrRemoveDriver()">Salvar</button>
+    </div>
+  </div>
+  <script>
+    const SHEET_ID = "1y41lFvyVIbjtiAIA8OT0cXRSfS1WRCEZq3yjUWDOEHo";
+    const API_KEY = "AIzaSyDUSAoIjOt1J5aTB7E713inGNfrEQTLUXk";
+    const RANGE = "A:E";
+    const SHEET_NAO_MEXER = "Dados motoristas";
+
+    const URL = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${RANGE}?key=${API_KEY}`;
+    const URL_NAO_MEXER = `https://sheets.googleapis.com/v4/spreadsheets/${SHEET_ID}/values/${encodeURIComponent(SHEET_NAO_MEXER)}!B:C?key=${API_KEY}`;
+
+    let allData = [], filteredData = [], driversData = [];
+
+    function isToday(dateString) {
+      const today = new Date();
+      const [day, month, year] = dateString.split("/").map(Number);
+      const date = new Date(year, month - 1, day);
+      return (
+        date.getDate() === today.getDate() &&
+        date.getMonth() === today.getMonth() &&
+        date.getFullYear() === today.getFullYear()
+      );
+    }
+
+    async function fetchData() {
+      const response = await fetch(URL);
+      const data = await response.json();
+      if (data?.values?.length > 1) {
+        allData = data.values.slice(1);
+        filteredData = allData.filter(row => {
+          const [dateStr] = row[0]?.split(" ") || [""];
+          return isToday(dateStr);
+        });
+        displayData(filteredData);
+        populateHourFilter(filteredData);
+      }
+    }
+
+    async function fetchDriversData() {
+      const response = await fetch(URL_NAO_MEXER);
+      const data = await response.json();
+      if (data?.values?.length > 0) {
+        driversData = data.values;
+        populateDriverFilter(driversData);
+      }
+    }
+
+    function displayData(data) {
+      const tableBody = document.getElementById("table-body");
+      tableBody.innerHTML = "";
+      data.forEach(row => {
+        const tr = document.createElement("tr");
+        const [date, time] = row[0]?.split(" ") || ["", ""];
+        tr.innerHTML = `
+          <td>${date}</td>
+          <td>${time}</td>
+          <td>${row[1] || ""}</td>
+          <td>${row[2] || ""}</td>
+          <td>${row[3] || ""}</td>
+        `;
+        tableBody.appendChild(tr);
+      });
+    }
+
+    function populateDriverFilter(drivers) {
+      const select = document.getElementById("driver-filter");
+      select.innerHTML = '<option value="">Selecione um motorista</option>';
+      drivers.forEach(([name]) => {
+        const option = document.createElement("option");
+        option.value = name;
+        option.textContent = name;
+        select.appendChild(option);
+      });
+    }
+
+    function populateHourFilter(data) {
+      const select = document.getElementById("hour-filter");
+      select.innerHTML = '<option value="">Selecione um horário</option>';
+      [...new Set(data.map(row => row[3]).filter(Boolean))].forEach(hour => {
+        const option = document.createElement("option");
+        option.value = hour;
+        option.textContent = hour;
+        select.appendChild(option);
+      });
+    }
+
+    function applyFilters() {
+      const hour = document.getElementById("hour-filter").value.toLowerCase();
+      filteredData = allData.filter(row => row[3]?.toLowerCase() === hour);
+      displayData(filteredData);
+    }
+
+    function clearFilters() {
+      document.getElementById("hour-filter").value = "";
+      document.getElementById("driver-filter").value = "";
+      fetchData();
+    }
+
+    function sendMessage() {
+      const driver = document.getElementById("driver-filter").value;
+      const hour = document.getElementById("hour-filter").value;
+      if (!driver || !hour) return alert("Selecione o motorista e horário.");
+
+      const driverInfo = driversData.find(d => d[0] === driver);
+      if (!driverInfo?.[1]) return alert("Telefone não encontrado.");
+
+      let phone = driverInfo[1].replace(/\D/g, '');
+      if (phone.startsWith('0')) phone = phone.substring(1);
+      if (!phone.startsWith('55')) phone = '55' + phone;
+
+      const pontos = filteredData.map(row => row[2]).filter(Boolean).join(", ");
+      const msg = `Olá ${driver}, segue pontos do horário ${hour}: ${pontos}. Bom trabalho!`;
+      const url = `https://web.whatsapp.com/send?phone=${phone}&text=${encodeURIComponent(msg)}`;
+      window.open(url, "_blank");
+    }
+
+    function openModal(action) {
+      const modal = document.getElementById("addDriverModal");
+      modal.style.display = "flex";
+      const title = document.getElementById("modal-title");
+      const nameInput = document.getElementById("new-driver-name");
+      const phoneInput = document.getElementById("new-driver-phone");
+      const removeSelect = document.getElementById("remove-driver-select");
+      const actionBtn = document.getElementById("modal-action-button");
+
+      if (action === 'add') {
+        title.textContent = "Adicionar Motorista";
+        nameInput.style.display = phoneInput.style.display = "block";
+        removeSelect.style.display = "none";
+        actionBtn.textContent = "Salvar";
+      } else {
+        title.textContent = "Excluir Motorista";
+        nameInput.style.display = phoneInput.style.display = "none";
+        removeSelect.style.display = "block";
+        actionBtn.textContent = "Excluir";
+        removeSelect.innerHTML = '<option value="">Selecione um motorista para excluir</option>';
+        driversData.forEach(([name]) => {
+          const opt = document.createElement("option");
+          opt.value = name;
+          opt.textContent = name;
+          removeSelect.appendChild(opt);
+        });
+      }
+    }
+
+    function saveOrRemoveDriver() {
+      const actionBtn = document.getElementById("modal-action-button");
+      const name = document.getElementById("new-driver-name").value.trim();
+      const phone = document.getElementById("new-driver-phone").value.trim();
+      const removeSelect = document.getElementById("remove-driver-select");
+
+      if (actionBtn.textContent === "Salvar") {
+        if (!name || !phone) return alert("Preencha nome e telefone!");
+        driversData.push([name, phone]);
+        populateDriverFilter(driversData);
+      } else {
+        const toRemove = removeSelect.value;
+        if (!toRemove) return alert("Selecione um motorista para excluir!");
+        driversData = driversData.filter(([n]) => n !== toRemove);
+        populateDriverFilter(driversData);
+      }
+
+      document.getElementById("addDriverModal").style.display = "none";
+      document.getElementById("new-driver-name").value = "";
+      document.getElementById("new-driver-phone").value = "";
+    }
+
+    window.onclick = function(e) {
+      if (e.target === document.getElementById("addDriverModal")) {
+        document.getElementById("addDriverModal").style.display = "none";
+      }
+    }
+
+    fetchData();
+    fetchDriversData();
+    setInterval(() => {
+      fetchData();
+      fetchDriversData();
+    }, 100000);
+  </script>
+</body>
+</html>
